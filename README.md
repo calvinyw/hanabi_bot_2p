@@ -212,6 +212,26 @@ distance + 0.1 * log(clusterSize + 1)
 That keeps the closest-centroid step from overloading a single large legal
 cluster when another legal cluster is nearly as close.
 
+## `cluster_clue_rebalance_first_times.mjs`
+
+This file experiments with a two-phase clustering strategy that starts from the
+same 44-dimensional playable, trash, and saved embedding used by
+`cluster_clue_play_discard_v2.mjs`.
+
+The first phase runs rebalance-aware k-means for `MAX_REBALANCE_LOOPS = 10`
+loops. Each loop does:
+
+1. Assign each hand to its closest legal nonempty centroid.
+2. Run 3 rebalance passes, moving hands out of oversized clusters when there is
+   a smaller legal cluster available.
+3. Recompute centroids from the rebalanced assignments.
+
+The second phase then runs normal k-means for `MAX_NORMAL_LOOPS = 10` loops,
+using the centroids and assignments produced by the rebalance-aware phase as
+its initialization. This lets the early iterations push the clusters toward a
+more even distribution, then lets the final iterations settle by ordinary
+nearest-centroid distance without additional rebalancing.
+
 ## Interface Knowledge Markers
 
 The display derives card-slot knowledge from `globalPossibleHands`:
