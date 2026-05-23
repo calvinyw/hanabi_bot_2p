@@ -29,27 +29,27 @@ human can play a simplified two-player game while the page displays what clue
 the strategy recommends and what the players' current hand-level possibilities
 are.
 
-The current variant uses:
+Each new game starts on a setup screen. Choose:
 
 - 2 players
-- 4 cards per hand
-- 4 colors: Red, Yellow, Green, Blue
-- 4 ranks: 1, 2, 3, 4
-- 32 total cards
-- 3 copies of each 1, 2 copies of each 2, 2 copies of each 3, and 1 copy of
-  each 4
+- C colors, from 2 to 6
+- R ranks, from 3 to 6
+- H cards per hand, from 3 to 6
+
+For each color, the deck has 3 copies of rank 1, 2 copies of each rank 2
+through R-1, and 1 copy of rank R.
 
 ## Core Idea
 
 Each player has a `globalPossibleHands` object. It is a dictionary from ordered
-four-card hand keys to booleans:
+H-card hand keys to booleans:
 
 ```text
 R1|Y2|G3|B4 -> true
 R1|R1|R1|R1 -> false
 ```
 
-The key says which four cards might be in that player's hand, in slot order.
+The key says which cards might be in that player's hand, in slot order.
 The boolean says whether that whole hand is still possible.
 
 The interface tracks possibilities at the hand level rather than tracking an
@@ -90,7 +90,9 @@ globalPossibleHands[hand] =
   globalPossibleHands[hand] && clueToGive[hand] === X
 ```
 
-The app then reapplies visible-copy pruning.
+The app then reapplies visible-copy pruning. Large setups use a sampled hand
+universe so the browser remains responsive instead of trying to enumerate every
+ordered hand.
 
 ## Strategy Flow
 
@@ -112,14 +114,14 @@ clueToGive[handKey] = clueAction
 The interface looks up the target player's actual hand in that mapping and
 displays the corresponding clue recommendation.
 
-There are 120 possible clue-action clusters:
+The number of possible clue-action clusters depends on the setup:
 
 ```text
-8 clue labels * 15 nonempty touched-card subsets = 120
+(C + R) clue labels * (2^H - 1) nonempty touched-card subsets
 ```
 
-The 8 clue labels are the 4 colors and 4 ranks. The 15 touched-card subsets are
-the nonempty subsets of a 4-card hand.
+The clue labels are the selected colors and ranks. The touched-card subsets are
+the nonempty subsets of the configured H-card hand.
 
 ## `clue_logic.mjs`
 
@@ -139,18 +141,25 @@ trying to cluster hands or optimize clue quality.
 
 This file implements the first clustering strategy.
 
-Each possible hand is embedded into a 32-dimensional vector:
+Each possible hand is embedded into a vector with one color one-hot, one rank
+one-hot, and three status dimensions per card:
 
 ```text
-4 cards * (4 color dimensions + 4 rank dimensions) = 32 dimensions
+H cards * (C color dimensions + R rank dimensions + 3 status dimensions)
 ```
 
 For each card slot:
 
-- the first 4 dimensions are a one-hot color encoding
-- the next 4 dimensions are a one-hot rank encoding
+- the first C dimensions are a one-hot color encoding
+- the next R dimensions are a one-hot rank encoding
+- 1 dimension has value C+R if the card is currently playable, otherwise 0
+- 1 dimension has value C+R if the card is trash, otherwise 0
+- 1 dimension has value R+C/2 if the card is saved, otherwise 0
 
-The algorithm clusters the currently true possible hands into the 120 possible
+Trash cards intentionally zero out the color and rank one-hots, so a trash card
+embeds as `(0xC, 0xR, 0, C+R, 0)`.
+
+The algorithm clusters the currently true possible hands into the configured
 clue-action clusters. A hand can only be assigned to clusters corresponding to
 legal clues for that exact hand. For example, if a hand contains no Blue cards,
 it cannot be assigned to any Blue clue cluster.
@@ -171,22 +180,22 @@ cluster.
 
 ## `cluster_clue_play_discard.mjs` and `cluster_clue_play_discard_v2.mjs`
 
-These files extend `cluster_clue_basic.mjs` by adding game-state features to the
-embedding. `two-player-hanabi.mjs` imports `cluster_clue_play_discard_v2.mjs`.
+These files use the same game-state features as `cluster_clue_basic.mjs`.
+`two-player-hanabi.mjs` imports `cluster_clue_rebalance_first_times.mjs`.
 
-Each possible hand is embedded into a 44-dimensional vector:
+Each possible hand uses the same setup-driven embedding:
 
 ```text
-4 cards * (4 color + 4 rank + 1 playable + 1 trash + 1 saved) = 44 dimensions
+H cards * (C color + R rank + 1 playable + 1 trash + 1 saved)
 ```
 
 For each card slot:
 
-- 4 dimensions encode color
-- 4 dimensions encode rank
-- 1 dimension has value 8 if the card is currently playable, otherwise 0
-- 1 dimension has value 8 if the card is trash, otherwise 0
-- 1 dimension has value 3 if the card is saved, otherwise 0
+- C dimensions encode color
+- R dimensions encode rank
+- 1 dimension has value C+R if the card is currently playable, otherwise 0
+- 1 dimension has value C+R if the card is trash, otherwise 0
+- 1 dimension has value R+C/2 if the card is saved, otherwise 0
 
 The card status features mean:
 
@@ -197,25 +206,16 @@ The card status features mean:
 - `saved`: the card is not playable and not trash, and all other copies of that
   card identity have been discarded.
 
-This strategy uses the same 120 legal clue-action clusters and the same
+This strategy uses the same configured legal clue-action clusters and the same
 modified k-means structure as `cluster_clue_basic.mjs`. The main difference is
 that the distance calculation sees playable, trash, and saved status, so the
 clusters can group hands by strategically meaningful card roles rather than
 only by color and rank identity.
 
-This file also adds a small cluster-size balance penalty during reassignment:
-
-```text
-distance + 0.1 * log(clusterSize + 1)
-```
-
-That keeps the closest-centroid step from overloading a single large legal
-cluster when another legal cluster is nearly as close.
-
 ## `cluster_clue_rebalance_first_times.mjs`
 
 This file experiments with a two-phase clustering strategy that starts from the
-same 44-dimensional playable, trash, and saved embedding used by
+same setup-driven playable, trash, and saved embedding used by
 `cluster_clue_play_discard_v2.mjs`.
 
 The first phase runs rebalance-aware k-means for `MAX_REBALANCE_LOOPS = 10`

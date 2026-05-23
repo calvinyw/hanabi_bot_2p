@@ -1,35 +1,53 @@
 import {
-  CLUE_LABELS,
   createClueAction,
   createClusterClueMapping,
   getClueActionClue,
   getClueActionTouchedCardIndexes,
 } from "./clue_logic/cluster_clue_rebalance_first_times.mjs";
 
-const COLORS = ["R", "Y", "G", "B"];
-const RANKS = ["1", "2", "3", "4"];
-const CLUES = [...COLORS, ...RANKS];
-const ALL_CLUSTER_MASKS = Array.from({ length: 15 }, (_, index) => index + 1);
-const COLOR_NAMES = {
-  R: "Red",
-  Y: "Yellow",
-  G: "Green",
-  B: "Blue",
+const COLOR_DEFINITIONS = [
+  ["R", "Red"],
+  ["Y", "Yellow"],
+  ["G", "Green"],
+  ["B", "Blue"],
+  ["W", "White"],
+  ["P", "Purple"],
+];
+const RANK_NAMES = {
+  1: "One",
+  2: "Two",
+  3: "Three",
+  4: "Four",
+  5: "Five",
+  6: "Six",
 };
-const CARD_IDENTITIES = COLORS.flatMap((color) =>
-  [1, 2, 3, 4].map((rank) => `${color}${rank}`),
-);
-const HIGHEST_RANK = 4;
-const TOTAL_CARD_COPIES = Object.fromEntries(
-  CARD_IDENTITIES.map((card) => [card, getTotalCardCopies(card)]),
-);
-const HAND_SIZE = 4;
+const DEFAULT_SETUP = {
+  colorCount: 4,
+  rankCount: 4,
+  handSize: 4,
+};
 const MAX_CLUE_TOKENS = 8;
 const MAX_STRIKES = 3;
 const POSSIBILITY_SAMPLE_LIMIT = 60;
-const ALL_HAND_KEYS = buildAllHandKeys();
+const MAX_EXACT_HAND_KEYS = 180_000;
+const MAX_SAMPLED_HAND_KEYS = 500_000;
+
+let COLORS = [];
+let RANKS = [];
+let CLUES = [];
+let ALL_CLUSTER_MASKS = [];
+let COLOR_NAMES = {};
+let CLUE_LABELS = {};
+let CARD_IDENTITIES = [];
+let HIGHEST_RANK = 0;
+let TOTAL_CARD_COPIES = {};
+let HAND_SIZE = 0;
+let ALL_HAND_KEYS = [];
+let usingSampledHandUniverse = false;
 
 const state = {
+  setupVisible: true,
+  variant: undefined,
   players: [
     createPlayer("Player A"),
     createPlayer("Player B"),
@@ -58,8 +76,9 @@ const state = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  configureVariant(DEFAULT_SETUP);
   bindControls();
-  startNewGame();
+  showSetupPage();
 });
 
 function bindControls() {
@@ -81,7 +100,11 @@ function bindControls() {
       cardIndexText === undefined ? undefined : Number.parseInt(cardIndexText, 10);
 
     if (action === "new-game") {
-      startNewGame();
+      showSetupPage();
+      return;
+    }
+
+    if (state.setupVisible) {
       return;
     }
 
@@ -133,17 +156,139 @@ function bindControls() {
       render();
     }
   });
+
+  getElement("setup-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+
+    const setup = readSetupForm();
+    if (setup === undefined) {
+      return;
+    }
+
+    configureVariant(setup);
+    state.setupVisible = false;
+    startNewGame();
+  });
+
+  for (const inputId of ["setup-colors", "setup-ranks", "setup-hand-size"]) {
+    getElement(inputId).addEventListener("input", renderSetupSummary);
+  }
+}
+
+function showSetupPage() {
+  state.setupVisible = true;
+
+  const setup = state.variant ?? DEFAULT_SETUP;
+  getElement("setup-colors").value = `${setup.colorCount}`;
+  getElement("setup-ranks").value = `${setup.rankCount}`;
+  getElement("setup-hand-size").value = `${setup.handSize}`;
+  getElement("setup-error").textContent = "";
+
+  renderSetupSummary();
+  renderSetupVisibility();
+}
+
+function readSetupForm() {
+  const colorCount = readSetupNumber("setup-colors", 2, 6);
+  const rankCount = readSetupNumber("setup-ranks", 3, 6);
+  const handSize = readSetupNumber("setup-hand-size", 3, 6);
+  const error = getElement("setup-error");
+
+  if (colorCount === undefined || rankCount === undefined || handSize === undefined) {
+    error.textContent = "Use C 2-6, R 3-6, and H 3-6.";
+    return undefined;
+  }
+
+  error.textContent = "";
+  return {
+    colorCount,
+    rankCount,
+    handSize,
+  };
+}
+
+function readSetupNumber(id, min, max) {
+  const input = getElement(id);
+  const value = Number.parseInt(input.value, 10);
+
+  if (Number.isNaN(value) || value < min || value > max) {
+    input.setAttribute("aria-invalid", "true");
+    return undefined;
+  }
+
+  input.removeAttribute("aria-invalid");
+  return value;
+}
+
+function renderSetupSummary() {
+  const setup = {
+    colorCount: readPreviewNumber("setup-colors", DEFAULT_SETUP.colorCount),
+    rankCount: readPreviewNumber("setup-ranks", DEFAULT_SETUP.rankCount),
+    handSize: readPreviewNumber("setup-hand-size", DEFAULT_SETUP.handSize),
+  };
+  const colorCount = Math.max(2, Math.min(6, setup.colorCount));
+  const rankCount = Math.max(3, Math.min(6, setup.rankCount));
+  const handSize = Math.max(3, Math.min(6, setup.handSize));
+  const cardIdentities = colorCount * rankCount;
+  const embeddingDimensions = handSize * (colorCount + rankCount + 3);
+  const deckSize = colorCount * (3 + Math.max(0, rankCount - 2) * 2 + 1);
+  const estimatedHands = cardIdentities ** handSize;
+  const mode =
+    estimatedHands > MAX_EXACT_HAND_KEYS
+      ? `Sampled hand universe (${MAX_SAMPLED_HAND_KEYS.toLocaleString()} max)`
+      : "Exact hand universe";
+
+  getElement("setup-summary").textContent =
+    `${deckSize} cards, ${embeddingDimensions} embedding dimensions, ${mode}.`;
+}
+
+function readPreviewNumber(id, fallback) {
+  const value = Number.parseInt(getElement(id).value, 10);
+  return Number.isNaN(value) ? fallback : value;
+}
+
+function renderSetupVisibility() {
+  getElement("setup-screen").hidden = !state.setupVisible;
+  getElement("game-screen").hidden = state.setupVisible;
+}
+
+function configureVariant(setup) {
+  const colorDefinitions = COLOR_DEFINITIONS.slice(0, setup.colorCount);
+  COLORS = colorDefinitions.map(([color]) => color);
+  RANKS = Array.from({ length: setup.rankCount }, (_, index) => `${index + 1}`);
+  CLUES = [...COLORS, ...RANKS];
+  ALL_CLUSTER_MASKS = Array.from(
+    { length: (1 << setup.handSize) - 1 },
+    (_, index) => index + 1,
+  );
+  COLOR_NAMES = Object.fromEntries(colorDefinitions);
+  CLUE_LABELS = {
+    ...Object.fromEntries(colorDefinitions),
+    ...Object.fromEntries(RANKS.map((rank) => [rank, RANK_NAMES[rank] ?? rank])),
+  };
+  CARD_IDENTITIES = COLORS.flatMap((color) =>
+    RANKS.map((rank) => `${color}${rank}`),
+  );
+  HIGHEST_RANK = setup.rankCount;
+  TOTAL_CARD_COPIES = Object.fromEntries(
+    CARD_IDENTITIES.map((card) => [card, getTotalCardCopies(card)]),
+  );
+  HAND_SIZE = setup.handSize;
+  ALL_HAND_KEYS = [];
+  usingSampledHandUniverse = false;
+
+  state.variant = {
+    ...setup,
+    colors: [...COLORS],
+    ranks: [...RANKS],
+    highestRank: HIGHEST_RANK,
+  };
 }
 
 function startNewGame() {
   state.deck = shuffle(buildDeck());
   state.discards = [];
-  state.playedStacks = {
-    R: 0,
-    Y: 0,
-    G: 0,
-    B: 0,
-  };
+  state.playedStacks = Object.fromEntries(COLORS.map((color) => [color, 0]));
   state.clueTokens = MAX_CLUE_TOKENS;
   state.strikes = 0;
   state.turn = 1;
@@ -158,9 +303,12 @@ function startNewGame() {
 
   for (const player of state.players) {
     player.hand = [];
-    player.globalPossibleHands = createGlobalPossibleHands(true);
+    player.globalPossibleHands = Object.create(null);
     player.possibleVersion = 0;
-    player.possibilitySnapshot = summarizePossibleHands(player.globalPossibleHands);
+    player.possibilitySnapshot = {
+      count: 0,
+      sample: [],
+    };
   }
 
   for (let cardIndex = 0; cardIndex < HAND_SIZE; cardIndex++) {
@@ -170,6 +318,16 @@ function startNewGame() {
         player.hand.push(card);
       }
     }
+  }
+
+  ALL_HAND_KEYS = buildPossibleHandUniverse(
+    state.players.map((player) => handToKey(player.hand)),
+  );
+
+  for (const player of state.players) {
+    const actualHandKey = handToKey(player.hand);
+    player.globalPossibleHands = createGlobalPossibleHands(true, [actualHandKey]);
+    player.possibilitySnapshot = summarizePossibleHands(player.globalPossibleHands);
   }
 
   render();
@@ -196,7 +354,7 @@ function buildDeck() {
       deck.push(`${color}1`);
     }
 
-    for (const rank of [2, 3]) {
+    for (let rank = 2; rank < HIGHEST_RANK; rank++) {
       for (let copy = 0; copy < 2; copy++) {
         deck.push(`${color}${rank}`);
       }
@@ -209,7 +367,7 @@ function buildDeck() {
 }
 
 function getTotalCardCopies(card) {
-  const rank = Number.parseInt(card[1] ?? "0", 10);
+  const rank = Number.parseInt(getCardRank(card), 10);
 
   if (rank === 1) {
     return 3;
@@ -242,27 +400,83 @@ function drawCard() {
 
 function buildAllHandKeys() {
   const handKeys = [];
+  const currentHand = [];
 
-  for (const card1 of CARD_IDENTITIES) {
-    for (const card2 of CARD_IDENTITIES) {
-      for (const card3 of CARD_IDENTITIES) {
-        for (const card4 of CARD_IDENTITIES) {
-          handKeys.push(`${card1}|${card2}|${card3}|${card4}`);
-        }
-      }
+  function appendHands() {
+    if (currentHand.length === HAND_SIZE) {
+      handKeys.push(handToKey(currentHand));
+      return;
+    }
+
+    for (const card of CARD_IDENTITIES) {
+      currentHand.push(card);
+      appendHands();
+      currentHand.pop();
     }
   }
 
+  appendHands();
   return handKeys;
 }
 
-function createGlobalPossibleHands(initialValue) {
+function buildPossibleHandUniverse(seedHandKeys = []) {
+  const estimatedHandKeys = CARD_IDENTITIES.length ** HAND_SIZE;
+  usingSampledHandUniverse = estimatedHandKeys > MAX_EXACT_HAND_KEYS;
+
+  if (!usingSampledHandUniverse) {
+    return buildAllHandKeys();
+  }
+
+  const handKeys = new Set();
+  const unavailableCounts = getVisibleUnavailableCardCounts();
+
+  for (const handKey of seedHandKeys) {
+    if (isHandPossibleWithVisibleCopies(handKey, unavailableCounts)) {
+      handKeys.add(handKey);
+    }
+  }
+
+  const maxAttempts = MAX_SAMPLED_HAND_KEYS * 30;
+  let attempts = 0;
+
+  while (handKeys.size < MAX_SAMPLED_HAND_KEYS && attempts < maxAttempts) {
+    attempts++;
+    const handKey = createRandomHandKey();
+
+    if (isHandPossibleWithVisibleCopies(handKey, unavailableCounts)) {
+      handKeys.add(handKey);
+    }
+  }
+
+  return [...handKeys];
+}
+
+function createRandomHandKey() {
+  const availableCards = buildDeck();
+  const hand = [];
+
+  for (let cardIndex = 0; cardIndex < HAND_SIZE; cardIndex++) {
+    const availableIndex = Math.floor(Math.random() * availableCards.length);
+    const [card] = availableCards.splice(availableIndex, 1);
+    hand.push(card);
+  }
+
+  return handToKey(hand);
+}
+
+function createGlobalPossibleHands(initialValue, seedHandKeys = []) {
   const globalPossibleHands = Object.create(null);
   const unavailableCounts = getVisibleUnavailableCardCounts();
 
   for (const handKey of ALL_HAND_KEYS) {
     globalPossibleHands[handKey] =
       initialValue && isHandPossibleWithVisibleCopies(handKey, unavailableCounts);
+  }
+
+  for (const handKey of seedHandKeys) {
+    if (initialValue && isHandPossibleWithVisibleCopies(handKey, unavailableCounts)) {
+      globalPossibleHands[handKey] = true;
+    }
   }
 
   return globalPossibleHands;
@@ -272,7 +486,7 @@ function summarizePossibleHands(globalPossibleHands) {
   let count = 0;
   const sample = [];
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(globalPossibleHands)) {
     if (globalPossibleHands[handKey]) {
       count++;
 
@@ -286,6 +500,10 @@ function summarizePossibleHands(globalPossibleHands) {
     count,
     sample,
   };
+}
+
+function getKnownHandKeys(globalPossibleHands) {
+  return Object.keys(globalPossibleHands);
 }
 
 function giveStrategyClue() {
@@ -302,7 +520,7 @@ function giveStrategyClue() {
   const clueAction = strategy.clueToGive[actualHandKey];
 
   if (clueAction === undefined) {
-    state.message = "The strategy can only clue a four-card hand.";
+    state.message = `The strategy can only clue a ${HAND_SIZE}-card hand.`;
     render();
     return;
   }
@@ -333,7 +551,7 @@ function applyClue(playerIndex, clueToGive, clueAction) {
     sample: [],
   };
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
     const stillPossible =
       player.globalPossibleHands[handKey] &&
       clueToGive[handKey] === clueAction &&
@@ -361,8 +579,8 @@ function playCard(cardIndex) {
     return;
   }
 
-  const color = card[0];
-  const rank = Number.parseInt(card[1] ?? "0", 10);
+  const color = getCardColor(card);
+  const rank = Number.parseInt(getCardRank(card), 10);
   const nextPlayableRank = state.playedStacks[color] + 1;
 
   if (rank === nextPlayableRank) {
@@ -444,8 +662,9 @@ function updatePossibleHandsAfterKnownCardChange(
 
   const nextGlobalPossibleHands = createGlobalPossibleHands(false);
   const unavailableCounts = getVisibleUnavailableCardCounts();
+  let nextHandCount = 0;
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
     if (!player.globalPossibleHands[handKey]) {
       continue;
     }
@@ -460,8 +679,12 @@ function updatePossibleHandsAfterKnownCardChange(
 
     for (const possibleDraw of CARD_IDENTITIES) {
       const nextHandKey = [...remainingCards, possibleDraw].join("|");
-      nextGlobalPossibleHands[nextHandKey] =
-        isHandPossibleWithVisibleCopies(nextHandKey, unavailableCounts);
+      nextHandCount += addPossibleHand(
+        nextGlobalPossibleHands,
+        nextHandKey,
+        unavailableCounts,
+        nextHandCount,
+      );
     }
   }
 
@@ -484,7 +707,7 @@ function pruneAllPossibleHandsByVisibleCopies() {
   for (const player of state.players) {
     let changed = false;
 
-    for (const handKey of ALL_HAND_KEYS) {
+    for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
       if (
         player.globalPossibleHands[handKey] &&
         !isHandPossibleWithVisibleCopies(handKey, unavailableCounts)
@@ -542,14 +765,42 @@ function isHandPossibleWithVisibleCopies(
   const handCounts = Object.create(null);
 
   for (const card of handKey.split("|")) {
+    if (TOTAL_CARD_COPIES[card] === undefined) {
+      return false;
+    }
+
     handCounts[card] = (handCounts[card] ?? 0) + 1;
 
-    if (handCounts[card] + unavailableCounts[card] > TOTAL_CARD_COPIES[card]) {
+    if (
+      handCounts[card] + (unavailableCounts[card] ?? 0) >
+      TOTAL_CARD_COPIES[card]
+    ) {
       return false;
     }
   }
 
   return true;
+}
+
+function addPossibleHand(
+  possibleHands,
+  handKey,
+  unavailableCounts,
+  currentHandCount,
+) {
+  if (possibleHands[handKey] || !isHandPossibleWithVisibleCopies(handKey, unavailableCounts)) {
+    return 0;
+  }
+
+  if (
+    usingSampledHandUniverse &&
+    currentHandCount >= MAX_SAMPLED_HAND_KEYS
+  ) {
+    return 0;
+  }
+
+  possibleHands[handKey] = true;
+  return 1;
 }
 
 function checkGameOver() {
@@ -648,10 +899,17 @@ function getStrategyGameState(targetPlayerIndex) {
     playedStacks: { ...state.playedStacks },
     discards: [...state.discards],
     turn: state.turn,
+    variant: state.variant,
   };
 }
 
 function render() {
+  renderSetupVisibility();
+
+  if (state.setupVisible) {
+    return;
+  }
+
   const strategy = state.gameOver ? undefined : getCurrentStrategy();
   const targetPlayerIndex = getPartnerIndex(state.currentPlayerIndex);
   const targetPlayer = state.players[targetPlayerIndex];
@@ -737,7 +995,10 @@ function renderPlayer(player, playerIndex) {
       </div>
       <strong>${player.possibilitySnapshot.count.toLocaleString()} hands</strong>
     </div>
-    <div class="hand-row">${cards}</div>
+    <div class="hand-row" style="--hand-size: ${HAND_SIZE}; --hand-size-mobile: ${Math.min(
+      HAND_SIZE,
+      2,
+    )}">${cards}</div>
     <div class="possibilities">
       <div class="possibility-heading">
         <span>Global possible hands</span>
@@ -758,8 +1019,8 @@ function renderCardHTML(
   knownCardStatus,
   possibleCards,
 ) {
-  const color = card[0];
-  const rank = card[1];
+  const color = getCardColor(card);
+  const rank = getCardRank(card);
   const knowledgeClasses = [
     knownCardStatus?.playable ? "known-playable" : "",
     knownCardStatus?.saved ? "known-saved" : "",
@@ -811,7 +1072,7 @@ function getPossibleCardsByIndex(player) {
     () => new Set(),
   );
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
     if (!player.globalPossibleHands[handKey]) {
       continue;
     }
@@ -840,7 +1101,7 @@ function getKnownCardStatuses(player) {
   const discardedCounts = getDiscardedCardCounts();
   let possibleHandCount = 0;
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
     if (!player.globalPossibleHands[handKey]) {
       continue;
     }
@@ -874,8 +1135,8 @@ function getKnownCardStatuses(player) {
 }
 
 function getCardStatus(card, discardedCounts = getDiscardedCardCounts()) {
-  const color = card[0];
-  const rank = Number.parseInt(card[1] ?? "0", 10);
+  const color = getCardColor(card);
+  const rank = Number.parseInt(getCardRank(card), 10);
   const playedRank = state.playedStacks[color] ?? 0;
   const playable = rank === playedRank + 1;
   const trash = rank <= playedRank;
@@ -897,7 +1158,7 @@ function renderHandKey(handKey) {
 }
 
 function renderMiniCard(card) {
-  return `<span class="mini-card mini-${card[0]}">${card}</span>`;
+  return `<span class="mini-card mini-${getCardColor(card)}">${card}</span>`;
 }
 
 function renderStrategyPanel(recommendedClueAction, targetPlayer, clueHistogram) {
@@ -930,7 +1191,7 @@ function getClueHistogram(clueToGive, targetPlayer) {
     ),
   );
 
-  for (const handKey of ALL_HAND_KEYS) {
+  for (const handKey of getKnownHandKeys(targetPlayer.globalPossibleHands)) {
     if (!targetPlayer.globalPossibleHands[handKey]) {
       continue;
     }
@@ -1033,8 +1294,16 @@ function handToKey(hand) {
   return hand.join("|");
 }
 
+function getCardColor(card) {
+  return card[0];
+}
+
+function getCardRank(card) {
+  return card.slice(1);
+}
+
 function formatCard(card) {
-  return `${COLOR_NAMES[card[0]]} ${card[1]}`;
+  return `${COLOR_NAMES[getCardColor(card)]} ${getCardRank(card)}`;
 }
 
 function formatClue(clue) {
@@ -1069,5 +1338,7 @@ window.twoPlayerHanabi = {
   get state() {
     return state;
   },
-  allHandKeys: ALL_HAND_KEYS,
+  get allHandKeys() {
+    return ALL_HAND_KEYS;
+  },
 };

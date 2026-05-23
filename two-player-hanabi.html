@@ -20,6 +20,8 @@
         --yellow: #d9b932;
         --green: #348f59;
         --blue: #3267bc;
+        --white: #f4f3e8;
+        --purple: #7a4acb;
       }
 
       * {
@@ -120,6 +122,88 @@
         gap: 10px;
         flex-wrap: wrap;
         justify-content: flex-end;
+      }
+
+      .setup-screen {
+        display: grid;
+        gap: 18px;
+        width: min(720px, 100%);
+        margin: 42px auto 0;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        background: rgba(247, 248, 244, 0.98);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+        padding: 22px;
+      }
+
+      .setup-screen[hidden],
+      .game-screen[hidden] {
+        display: none;
+      }
+
+      .setup-heading {
+        display: grid;
+        gap: 6px;
+      }
+
+      .setup-heading p,
+      #setup-summary,
+      #setup-error {
+        color: var(--muted);
+        font-weight: 700;
+      }
+
+      .setup-form {
+        display: grid;
+        gap: 14px;
+      }
+
+      .setup-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .setup-field {
+        display: grid;
+        gap: 7px;
+      }
+
+      .setup-field span {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .setup-field input {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--ink);
+        font-weight: 900;
+        padding: 0 12px;
+      }
+
+      .setup-field input[aria-invalid="true"] {
+        border-color: var(--danger);
+        box-shadow: 0 0 0 3px rgba(180, 49, 49, 0.14);
+      }
+
+      .setup-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      #start-game-button {
+        min-height: 44px;
+        background: var(--accent);
+        border-color: #a87909;
+        color: #201703;
       }
 
       .toggle {
@@ -232,6 +316,19 @@
         background: var(--blue);
       }
 
+      .stack-W,
+      .card-W,
+      .mini-W {
+        background: var(--white);
+        color: #17211d;
+      }
+
+      .stack-P,
+      .card-P,
+      .mini-P {
+        background: var(--purple);
+      }
+
       .table-layout {
         display: grid;
         grid-template-columns: minmax(0, 1fr) 360px;
@@ -279,7 +376,7 @@
 
       .hand-row {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(var(--hand-size, 4), minmax(0, 1fr));
         gap: 10px;
       }
 
@@ -627,6 +724,19 @@
         .hand-row {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+
+        .hand-row {
+          grid-template-columns: repeat(var(--hand-size-mobile, 2), minmax(0, 1fr));
+        }
+
+        .setup-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .setup-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
       }
     </style>
   </head>
@@ -647,73 +757,103 @@
         </div>
       </header>
 
-      <section class="scoreboard" aria-label="Game state">
-        <div class="turn-card">
-          <span id="turn-label">Turn 1</span>
-          <strong id="current-player-label">Player A</strong>
-          <p id="status-message">Loading...</p>
+      <section id="setup-screen" class="setup-screen" aria-label="Game setup">
+        <div class="setup-heading">
+          <h2>Game Setup</h2>
+          <p>Choose C colors, R ranks, and H cards per hand.</p>
         </div>
-        <div class="metrics">
-          <div class="metric">
-            <span>Deck</span>
-            <strong id="deck-count">0</strong>
+        <form id="setup-form" class="setup-form" novalidate>
+          <div class="setup-grid">
+            <label class="setup-field">
+              <span>C</span>
+              <input id="setup-colors" type="number" min="2" max="6" value="4" />
+            </label>
+            <label class="setup-field">
+              <span>R</span>
+              <input id="setup-ranks" type="number" min="3" max="6" value="4" />
+            </label>
+            <label class="setup-field">
+              <span>H</span>
+              <input id="setup-hand-size" type="number" min="3" max="6" value="4" />
+            </label>
           </div>
-          <div class="metric">
-            <span>Clues</span>
-            <strong id="clue-token-count">8</strong>
+          <div class="setup-actions">
+            <span id="setup-summary"></span>
+            <button id="start-game-button" type="submit">Start game</button>
           </div>
-          <div class="metric">
-            <span>Strikes</span>
-            <strong id="strike-count">0</strong>
+          <p id="setup-error" role="alert"></p>
+        </form>
+      </section>
+
+      <div id="game-screen" class="game-screen" hidden>
+        <section class="scoreboard" aria-label="Game state">
+          <div class="turn-card">
+            <span id="turn-label">Turn 1</span>
+            <strong id="current-player-label">Player A</strong>
+            <p id="status-message">Loading...</p>
           </div>
-          <div class="metric">
-            <span>Score</span>
-            <strong id="score-count">0</strong>
-          </div>
-          <div class="metric">
-            <span>Strategy</span>
-            <strong id="recommended-summary">No clue</strong>
-          </div>
-          <div id="stacks" class="stacks"></div>
-          <div class="discard-panel">
-            <div class="discard-heading">
-              <h3>Discards</h3>
-              <span id="discard-count">0</span>
+          <div class="metrics">
+            <div class="metric">
+              <span>Deck</span>
+              <strong id="deck-count">0</strong>
             </div>
-            <ol id="discard-list" class="discard-list"></ol>
+            <div class="metric">
+              <span>Clues</span>
+              <strong id="clue-token-count">8</strong>
+            </div>
+            <div class="metric">
+              <span>Strikes</span>
+              <strong id="strike-count">0</strong>
+            </div>
+            <div class="metric">
+              <span>Score</span>
+              <strong id="score-count">0</strong>
+            </div>
+            <div class="metric">
+              <span>Strategy</span>
+              <strong id="recommended-summary">No clue</strong>
+            </div>
+            <div id="stacks" class="stacks"></div>
+            <div class="discard-panel">
+              <div class="discard-heading">
+                <h3>Discards</h3>
+                <span id="discard-count">0</span>
+              </div>
+              <ol id="discard-list" class="discard-list"></ol>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <section class="table-layout">
-        <div id="players" class="players"></div>
+        <section class="table-layout">
+          <div id="players" class="players"></div>
 
-        <aside class="strategy-panel">
-          <div class="strategy-row">
-            <h2>Strategy clue</h2>
-            <span id="strategy-target">Player B</span>
-          </div>
-          <div class="strategy-value">
-            <span>Clue to give</span>
-            <strong id="strategy-clue">No clue</strong>
-          </div>
-          <div class="strategy-value">
-            <span>Cluster sizes</span>
-            <ol id="clue-histogram" class="clue-histogram"></ol>
-          </div>
-          <div class="strategy-value">
-            <span>Partner hand</span>
-            <div id="strategy-actual-hand"></div>
-          </div>
-          <button id="give-clue-button" type="button" data-action="give-clue">
-            Give clue
-          </button>
-          <div class="strategy-row">
-            <h3>Clue history</h3>
-          </div>
-          <ol id="clue-history" class="history-list"></ol>
-        </aside>
-      </section>
+          <aside class="strategy-panel">
+            <div class="strategy-row">
+              <h2>Strategy clue</h2>
+              <span id="strategy-target">Player B</span>
+            </div>
+            <div class="strategy-value">
+              <span>Clue to give</span>
+              <strong id="strategy-clue">No clue</strong>
+            </div>
+            <div class="strategy-value">
+              <span>Cluster sizes</span>
+              <ol id="clue-histogram" class="clue-histogram"></ol>
+            </div>
+            <div class="strategy-value">
+              <span>Partner hand</span>
+              <div id="strategy-actual-hand"></div>
+            </div>
+            <button id="give-clue-button" type="button" data-action="give-clue">
+              Give clue
+            </button>
+            <div class="strategy-row">
+              <h3>Clue history</h3>
+            </div>
+            <ol id="clue-history" class="history-list"></ol>
+          </aside>
+        </section>
+      </div>
     </main>
 
     <script type="module" src="./two-player-hanabi.mjs"></script>
