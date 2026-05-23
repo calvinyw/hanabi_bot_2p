@@ -4,7 +4,7 @@ import {
   createClusterClueMapping,
   getClueActionClue,
   getClueActionTouchedCardIndexes,
-} from "./cluster_clue_play_discard_v2.mjs";
+} from "./clue_logic/cluster_clue_rebalance_first_times.mjs";
 
 const COLORS = ["R", "Y", "G", "B"];
 const RANKS = ["1", "2", "3", "4"];
@@ -52,6 +52,7 @@ const state = {
   strategyCache: undefined,
   clueHistory: [],
   revealAllCards: false,
+  revealNoCards: false,
   message: "New game ready.",
   gameOver: false,
 };
@@ -112,6 +113,23 @@ function bindControls() {
 
     if (target instanceof HTMLInputElement) {
       state.revealAllCards = target.checked;
+      if (target.checked) {
+        state.revealNoCards = false;
+        getElement("reveal-none").checked = false;
+      }
+      render();
+    }
+  });
+
+  getElement("reveal-none").addEventListener("change", (event) => {
+    const target = event.target;
+
+    if (target instanceof HTMLInputElement) {
+      state.revealNoCards = target.checked;
+      if (target.checked) {
+        state.revealAllCards = false;
+        getElement("reveal-all").checked = false;
+      }
       render();
     }
   });
@@ -688,7 +706,8 @@ function renderPlayers() {
 
 function renderPlayer(player, playerIndex) {
   const isCurrentPlayer = playerIndex === state.currentPlayerIndex;
-  const canSeeCards = !isCurrentPlayer || state.revealAllCards;
+  const canSeeCards =
+    !state.revealNoCards && (!isCurrentPlayer || state.revealAllCards);
   const playerElement = document.createElement("section");
   playerElement.className = `player-panel${isCurrentPlayer ? " current" : ""}`;
   const knownCardStatuses = getKnownCardStatuses(player);
