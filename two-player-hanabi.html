@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Two Player Hanabi</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17211d;
+        --muted: #5e6f69;
+        --paper: #f7f8f4;
+        --panel: #ffffff;
+        --line: #d7ddd4;
+        --table: #163629;
+        --table-deep: #0f241d;
+        --accent: #d4a017;
+        --danger: #b43131;
+        --red: #cf3f3f;
+        --yellow: #d9b932;
+        --green: #348f59;
+        --blue: #3267bc;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(11, 25, 21, 0.82), rgba(11, 25, 21, 0.82)),
+          repeating-linear-gradient(
+            90deg,
+            #2a1f14 0px,
+            #3d2c1c 4px,
+            #241a12 8px
+          );
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        min-height: 36px;
+        border: 1px solid #bfc8bf;
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--ink);
+        cursor: pointer;
+        font-weight: 700;
+        padding: 0 12px;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(212, 160, 23, 0.18);
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.48;
+      }
+
+      .app-shell {
+        width: min(1480px, calc(100vw - 28px));
+        margin: 0 auto;
+        padding: 18px 0 28px;
+      }
+
+      .topbar,
+      .scoreboard,
+      .player-panel,
+      .strategy-panel {
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        background: rgba(247, 248, 244, 0.96);
+        box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 12px;
+        padding: 14px 16px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 1.35rem;
+        line-height: 1.1;
+      }
+
+      h2 {
+        font-size: 1.05rem;
+      }
+
+      h3 {
+        font-size: 0.95rem;
+      }
+
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+      }
+
+      .toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-weight: 700;
+        min-height: 36px;
+      }
+
+      .scoreboard {
+        display: grid;
+        grid-template-columns: 1.1fr 2fr;
+        gap: 14px;
+        margin-bottom: 12px;
+        padding: 14px;
+      }
+
+      .turn-card {
+        display: grid;
+        gap: 8px;
+        align-content: start;
+      }
+
+      .turn-card span {
+        color: var(--muted);
+        font-size: 0.86rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .turn-card strong {
+        font-size: 1.5rem;
+      }
+
+      #status-message {
+        min-height: 24px;
+        color: #33453e;
+        font-weight: 700;
+      }
+
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(92px, 1fr));
+        gap: 8px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 9px;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 0.76rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 2px;
+        font-size: 1.16rem;
+      }
+
+      .stacks {
+        grid-column: 1 / -1;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(96px, 1fr));
+        gap: 8px;
+      }
+
+      .stack {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 42px;
+        border-radius: 8px;
+        color: white;
+        padding: 0 12px;
+        font-weight: 800;
+      }
+
+      .stack-R,
+      .card-R,
+      .mini-R {
+        background: var(--red);
+      }
+
+      .stack-Y,
+      .card-Y,
+      .mini-Y {
+        background: var(--yellow);
+        color: #261d05;
+      }
+
+      .stack-G,
+      .card-G,
+      .mini-G {
+        background: var(--green);
+      }
+
+      .stack-B,
+      .card-B,
+      .mini-B {
+        background: var(--blue);
+      }
+
+      .table-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 360px;
+        gap: 12px;
+        align-items: start;
+      }
+
+      .players {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .player-panel {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .player-panel.current {
+        outline: 3px solid rgba(212, 160, 23, 0.45);
+      }
+
+      .player-heading,
+      .possibility-heading,
+      .strategy-row,
+      .discard-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .player-heading span,
+      .possibility-heading span,
+      .strategy-row span,
+      .discard-heading span,
+      .history-list span,
+      .discard-list span {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .hand-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .card-slot {
+        display: grid;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      .card-possibility-list {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        justify-content: center;
+        gap: 4px;
+        width: calc(100% - 20px);
+        max-height: 98px;
+        overflow: auto;
+        padding: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+        transform: translate(-50%, -50%);
+      }
+
+      .card-possibility-list .mini-card {
+        color: #000000;
+        margin-right: 0;
+      }
+
+      .no-possibilities {
+        align-self: center;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .card-face {
+        position: relative;
+        display: grid;
+        align-content: space-between;
+        width: 100%;
+        aspect-ratio: 0.72;
+        min-height: 126px;
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        border-radius: 8px;
+        color: white;
+        padding: 10px;
+        box-shadow: inset 0 -16px 32px rgba(0, 0, 0, 0.18);
+      }
+
+      .card-face.known-playable {
+        border: 4px solid #7cff00;
+        box-shadow:
+          inset 0 -16px 32px rgba(0, 0, 0, 0.18),
+          0 0 0 3px rgba(124, 255, 0, 0.26);
+      }
+
+      .card-face.known-saved {
+        border: 4px solid #ff5ec4;
+        box-shadow:
+          inset 0 -16px 32px rgba(0, 0, 0, 0.18),
+          0 0 0 3px rgba(255, 94, 196, 0.24);
+      }
+
+      .card-face.known-playable-or-saved {
+        border: 4px solid transparent;
+        border-image: repeating-linear-gradient(
+            135deg,
+            #7cff00 0 10px,
+            #ff5ec4 10px 20px
+          )
+          1;
+        box-shadow:
+          inset 0 -16px 32px rgba(0, 0, 0, 0.18),
+          0 0 0 3px rgba(255, 168, 226, 0.22);
+      }
+
+      .trash-marker {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+        font-size: 1.35rem;
+      }
+
+      .card-face span {
+        font-size: 0.78rem;
+        font-weight: 900;
+        overflow-wrap: anywhere;
+        text-transform: uppercase;
+      }
+
+      .card-face strong {
+        font-size: 2.6rem;
+        line-height: 1;
+      }
+
+      .card-hidden {
+        background: repeating-linear-gradient(
+          135deg,
+          var(--table),
+          var(--table) 10px,
+          var(--table-deep) 10px,
+          var(--table-deep) 20px
+        );
+      }
+
+      .card-actions {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      .possibilities {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .possibilities ol {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(188px, 1fr));
+        gap: 6px;
+        max-height: 176px;
+        overflow: auto;
+        margin: 10px 0 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .possibilities li {
+        min-width: 0;
+        border: 1px solid #e2e7df;
+        border-radius: 8px;
+        padding: 5px;
+        white-space: nowrap;
+      }
+
+      .mini-card {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 34px;
+        height: 24px;
+        margin-right: 4px;
+        border: 1px solid rgba(0, 0, 0, 0.18);
+        border-radius: 6px;
+        color: white;
+        font-size: 0.76rem;
+        font-weight: 900;
+      }
+
+      .strategy-panel {
+        position: sticky;
+        top: 12px;
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+
+      .strategy-value {
+        display: grid;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 10px;
+      }
+
+      .strategy-value span {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .strategy-value strong {
+        font-size: 1.3rem;
+      }
+
+      .clue-histogram {
+        display: grid;
+        gap: 7px;
+        max-height: 240px;
+        overflow: auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .clue-histogram li {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .histogram-label {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .histogram-label span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .histogram-label strong {
+        font-size: 0.82rem;
+      }
+
+      .histogram-track {
+        height: 10px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e8ece5;
+      }
+
+      .histogram-bar {
+        height: 100%;
+        min-width: 2px;
+        border-radius: inherit;
+        background: var(--accent);
+      }
+
+      .empty-histogram {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      #give-clue-button {
+        min-height: 44px;
+        background: var(--accent);
+        border-color: #a87909;
+        color: #201703;
+      }
+
+      .history-list {
+        display: grid;
+        gap: 7px;
+        max-height: 214px;
+        overflow: auto;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .discard-panel {
+        grid-column: 1 / -1;
+        display: grid;
+        gap: 6px;
+      }
+
+      .discard-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 38px;
+        max-height: 118px;
+        overflow: auto;
+        margin: 0;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        list-style: none;
+      }
+
+      .discard-list li {
+        display: flex;
+      }
+
+      .discard-list span {
+        align-self: center;
+      }
+
+      .discard-list .mini-card {
+        color: #000000;
+      }
+
+      .history-list li {
+        display: grid;
+        gap: 2px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        padding: 8px;
+      }
+
+      @media (max-width: 980px) {
+        .scoreboard,
+        .table-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .players {
+          grid-template-columns: 1fr;
+        }
+
+        .strategy-panel {
+          position: static;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .app-shell {
+          width: min(100% - 16px, 1480px);
+          padding-top: 8px;
+        }
+
+        .topbar,
+        .player-heading,
+        .possibility-heading,
+        .strategy-row,
+        .discard-heading {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .top-actions {
+          justify-content: flex-start;
+        }
+
+        .metrics,
+        .stacks,
+        .hand-row {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <h1>Two Player Hanabi</h1>
+        <div class="top-actions">
+          <label class="toggle">
+            <input id="reveal-all" type="checkbox" />
+            Reveal all
+          </label>
+          <button type="button" data-action="new-game">New game</button>
+        </div>
+      </header>
+
+      <section class="scoreboard" aria-label="Game state">
+        <div class="turn-card">
+          <span id="turn-label">Turn 1</span>
+          <strong id="current-player-label">Player A</strong>
+          <p id="status-message">Loading...</p>
+        </div>
+        <div class="metrics">
+          <div class="metric">
+            <span>Deck</span>
+            <strong id="deck-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Clues</span>
+            <strong id="clue-token-count">8</strong>
+          </div>
+          <div class="metric">
+            <span>Strikes</span>
+            <strong id="strike-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Score</span>
+            <strong id="score-count">0</strong>
+          </div>
+          <div class="metric">
+            <span>Strategy</span>
+            <strong id="recommended-summary">No clue</strong>
+          </div>
+          <div id="stacks" class="stacks"></div>
+          <div class="discard-panel">
+            <div class="discard-heading">
+              <h3>Discards</h3>
+              <span id="discard-count">0</span>
+            </div>
+            <ol id="discard-list" class="discard-list"></ol>
+          </div>
+        </div>
+      </section>
+
+      <section class="table-layout">
+        <div id="players" class="players"></div>
+
+        <aside class="strategy-panel">
+          <div class="strategy-row">
+            <h2>Strategy clue</h2>
+            <span id="strategy-target">Player B</span>
+          </div>
+          <div class="strategy-value">
+            <span>Clue to give</span>
+            <strong id="strategy-clue">No clue</strong>
+          </div>
+          <div class="strategy-value">
+            <span>Cluster sizes</span>
+            <ol id="clue-histogram" class="clue-histogram"></ol>
+          </div>
+          <div class="strategy-value">
+            <span>Partner hand</span>
+            <div id="strategy-actual-hand"></div>
+          </div>
+          <button id="give-clue-button" type="button" data-action="give-clue">
+            Give clue
+          </button>
+          <div class="strategy-row">
+            <h3>Clue history</h3>
+          </div>
+          <ol id="clue-history" class="history-list"></ol>
+        </aside>
+      </section>
+    </main>
+
+    <script type="module" src="./two-player-hanabi.mjs"></script>
+  </body>
+</html>

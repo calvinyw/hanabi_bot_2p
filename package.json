@@ -1,0 +1,8 @@
+{
+  "name": "two-player-hanabi",
+  "private": true,
+  "description": "Two-player Hanabi clue-strategy prototype",
+  "scripts": {
+    "start": "npx --yes serve . -p 4173"
+  }
+}
