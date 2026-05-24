@@ -4,6 +4,9 @@ import {
   getClueActionClue,
   getClueActionTouchedCardIndexes,
 } from "./clue_logic/cluster_clue_rebalance_first_times.mjs";
+import {
+  everythingIsACluePlayer,
+} from "./everything_is_a_clue_player/everything_is_a_clue_player.mjs";
 
 const COLOR_DEFINITIONS = [
   ["R", "Red"],
@@ -25,6 +28,15 @@ const DEFAULT_SETUP = {
   colorCount: 4,
   rankCount: 4,
   handSize: 4,
+  strategyMode: "cluster-clue",
+};
+const STRATEGY_MODES = {
+  CLUSTER_CLUE: "cluster-clue",
+  EVERYTHING_IS_A_CLUE: "everything-is-a-clue",
+};
+const STRATEGY_MODE_LABELS = {
+  [STRATEGY_MODES.CLUSTER_CLUE]: "Cluster clue",
+  [STRATEGY_MODES.EVERYTHING_IS_A_CLUE]: "Everything is a clue",
 };
 const MAX_CLUE_TOKENS = 8;
 const MAX_STRIKES = 3;
@@ -48,6 +60,8 @@ let usingSampledHandUniverse = false;
 const state = {
   setupVisible: true,
   variant: undefined,
+  strategyMode: DEFAULT_SETUP.strategyMode,
+  everythingProbabilities: [],
   players: [
     createPlayer("Player A"),
     createPlayer("Player B"),
@@ -112,8 +126,8 @@ function bindControls() {
       return;
     }
 
-    if (action === "give-clue") {
-      giveStrategyClue();
+    if (action === "strategy-action") {
+      runStrategyAction();
       return;
     }
 
@@ -173,15 +187,40 @@ function bindControls() {
   for (const inputId of ["setup-colors", "setup-ranks", "setup-hand-size"]) {
     getElement(inputId).addEventListener("input", renderSetupSummary);
   }
+
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+
+    if (
+      target instanceof HTMLInputElement &&
+      target.dataset.probabilityIndex !== undefined
+    ) {
+      const probabilityIndex = Number.parseInt(target.dataset.probabilityIndex, 10);
+
+      if (!Number.isNaN(probabilityIndex)) {
+        state.everythingProbabilities[probabilityIndex] = Number.parseFloat(
+          target.value,
+        );
+        renderProbabilityTotal();
+      }
+    }
+  });
 }
 
 function showSetupPage() {
   state.setupVisible = true;
 
-  const setup = state.variant ?? DEFAULT_SETUP;
+  const setup =
+    state.variant === undefined
+      ? DEFAULT_SETUP
+      : {
+          ...state.variant,
+          strategyMode: state.strategyMode,
+        };
   getElement("setup-colors").value = `${setup.colorCount}`;
   getElement("setup-ranks").value = `${setup.rankCount}`;
   getElement("setup-hand-size").value = `${setup.handSize}`;
+  setSetupStrategyMode(setup.strategyMode);
   getElement("setup-error").textContent = "";
 
   renderSetupSummary();
@@ -192,9 +231,15 @@ function readSetupForm() {
   const colorCount = readSetupNumber("setup-colors", 2, 6);
   const rankCount = readSetupNumber("setup-ranks", 3, 6);
   const handSize = readSetupNumber("setup-hand-size", 3, 6);
+  const strategyMode = readSetupStrategyMode();
   const error = getElement("setup-error");
 
-  if (colorCount === undefined || rankCount === undefined || handSize === undefined) {
+  if (
+    colorCount === undefined ||
+    rankCount === undefined ||
+    handSize === undefined ||
+    strategyMode === undefined
+  ) {
     error.textContent = "Use C 2-6, R 3-6, and H 3-6.";
     return undefined;
   }
@@ -204,7 +249,33 @@ function readSetupForm() {
     colorCount,
     rankCount,
     handSize,
+    strategyMode,
   };
+}
+
+function setSetupStrategyMode(strategyMode) {
+  const selectedMode = STRATEGY_MODE_LABELS[strategyMode]
+    ? strategyMode
+    : DEFAULT_SETUP.strategyMode;
+
+  for (const input of document.querySelectorAll("input[name='setup-strategy']")) {
+    if (input instanceof HTMLInputElement) {
+      input.checked = input.value === selectedMode;
+    }
+  }
+}
+
+function readSetupStrategyMode() {
+  const selectedInput = document.querySelector("input[name='setup-strategy']:checked");
+
+  if (
+    selectedInput instanceof HTMLInputElement &&
+    STRATEGY_MODE_LABELS[selectedInput.value] !== undefined
+  ) {
+    return selectedInput.value;
+  }
+
+  return undefined;
 }
 
 function readSetupNumber(id, min, max) {
@@ -247,6 +318,10 @@ function readPreviewNumber(id, fallback) {
   return Number.isNaN(value) ? fallback : value;
 }
 
+function createDefaultEverythingProbabilities(handSize) {
+  return [...Array.from({ length: handSize + 2 }, () => 0), 1];
+}
+
 function renderSetupVisibility() {
   getElement("setup-screen").hidden = !state.setupVisible;
   getElement("game-screen").hidden = state.setupVisible;
@@ -276,9 +351,13 @@ function configureVariant(setup) {
   HAND_SIZE = setup.handSize;
   ALL_HAND_KEYS = [];
   usingSampledHandUniverse = false;
+  state.strategyMode = setup.strategyMode ?? DEFAULT_SETUP.strategyMode;
+  state.everythingProbabilities = createDefaultEverythingProbabilities(HAND_SIZE);
 
   state.variant = {
-    ...setup,
+    colorCount: setup.colorCount,
+    rankCount: setup.rankCount,
+    handSize: setup.handSize,
     colors: [...COLORS],
     ranks: [...RANKS],
     highestRank: HIGHEST_RANK,
@@ -506,6 +585,69 @@ function getKnownHandKeys(globalPossibleHands) {
   return Object.keys(globalPossibleHands);
 }
 
+function runStrategyAction() {
+  if (isEverythingIsAClueMode()) {
+    runEverythingIsAClueAction();
+    return;
+  }
+
+  giveStrategyClue();
+}
+
+function runEverythingIsAClueAction() {
+  const targetPlayerIndex = getPartnerIndex(state.currentPlayerIndex);
+  const targetPlayer = state.players[targetPlayerIndex];
+  const actionPositions = getEverythingActionPositions(currentPlayer());
+  let probabilities;
+
+  try {
+    probabilities = readEverythingProbabilities();
+  } catch (error) {
+    state.message = error.message;
+    render();
+    return;
+  }
+
+  let result;
+  try {
+    result = everythingIsACluePlayer({
+      partnerGlobalPossibleHands: targetPlayer.globalPossibleHands,
+      partnerActualHandKey: handToKey(targetPlayer.hand),
+      actingPlayerHand: currentPlayer().hand,
+      trashPositions: actionPositions.trashPositions,
+      safeDiscardNotKnownTrashPositions:
+        actionPositions.safeDiscardNotKnownTrashPositions,
+      probabilities,
+      gameState: getStrategyGameState(targetPlayerIndex),
+    });
+  } catch (error) {
+    state.message = error.message;
+    render();
+    return;
+  }
+
+  refreshPlayerPossibilitySnapshot(targetPlayer);
+  recordEverythingAction(result, targetPlayer);
+
+  const signalSummary = formatEverythingSignalSummary(result, targetPlayer);
+
+  if (result.action.kind === "play") {
+    playCard(result.action.slotIndex, { signalSummary });
+    return;
+  }
+
+  if (result.action.kind === "discard") {
+    discardCard(result.action.position, { signalSummary });
+    return;
+  }
+
+  state.clueTokens--;
+  state.message = `${currentPlayer().name} gave ${targetPlayer.name} ${formatClueAction(
+    result.action.clueAction,
+  )}. ${signalSummary}`;
+  finishAction();
+}
+
 function giveStrategyClue() {
   if (state.clueTokens <= 0) {
     state.message = "No clue tokens available.";
@@ -532,6 +674,7 @@ function giveStrategyClue() {
     clueAction,
   )}.`;
   state.clueHistory.unshift({
+    type: "clue",
     giver: currentPlayer().name,
     receiver: targetPlayer.name,
     clueAction,
@@ -571,7 +714,121 @@ function applyClue(playerIndex, clueToGive, clueAction) {
   player.possibilitySnapshot = nextSnapshot;
 }
 
-function playCard(cardIndex) {
+function getEverythingActionPositions(player) {
+  const knownCardStatuses = getKnownCardStatuses(player);
+  const safeDiscardNotKnownTrashStatuses =
+    getSafeDiscardNotKnownTrashStatuses(player, knownCardStatuses);
+
+  return {
+    trashPositions: knownCardStatuses
+      .map((status, cardIndex) => (status.trash ? cardIndex : undefined))
+      .filter((cardIndex) => cardIndex !== undefined),
+    safeDiscardNotKnownTrashPositions: safeDiscardNotKnownTrashStatuses
+      .map((isSafeDiscardNotKnownTrash, cardIndex) =>
+        isSafeDiscardNotKnownTrash ? cardIndex : undefined,
+      )
+      .filter((cardIndex) => cardIndex !== undefined),
+  };
+}
+
+function getSafeDiscardNotKnownTrashStatuses(player, knownCardStatuses) {
+  return getSafeDiscardStatuses(player).map(
+    (isSafeDiscard, cardIndex) =>
+      isSafeDiscard && !knownCardStatuses[cardIndex]?.trash,
+  );
+}
+
+function getSafeDiscardStatuses(player) {
+  const hasSavedPossibility = Array.from(
+    { length: player.hand.length },
+    () => false,
+  );
+  const discardedCounts = getDiscardedCardCounts();
+  let possibleHandCount = 0;
+
+  for (const handKey of getKnownHandKeys(player.globalPossibleHands)) {
+    if (!player.globalPossibleHands[handKey]) {
+      continue;
+    }
+
+    possibleHandCount++;
+
+    for (const [cardIndex, card] of handKey.split("|").entries()) {
+      if (cardIndex >= hasSavedPossibility.length) {
+        continue;
+      }
+
+      hasSavedPossibility[cardIndex] ||= getCardStatus(
+        card,
+        discardedCounts,
+      ).saved;
+    }
+  }
+
+  if (possibleHandCount === 0) {
+    return hasSavedPossibility.map(() => false);
+  }
+
+  return hasSavedPossibility.map((savedPossible) => !savedPossible);
+}
+
+function readEverythingProbabilities() {
+  const probabilityInputs = [
+    ...document.querySelectorAll("input[data-probability-index]"),
+  ].filter((input) => input instanceof HTMLInputElement);
+
+  if (probabilityInputs.length !== currentPlayer().hand.length + 3) {
+    throw new Error("Probability controls are not ready.");
+  }
+
+  const probabilities = probabilityInputs.map((input) =>
+    Number.parseFloat(input.value),
+  );
+
+  if (probabilities.some((probability) => !Number.isFinite(probability))) {
+    throw new Error("Use numeric probabilities.");
+  }
+
+  return probabilities;
+}
+
+function refreshPlayerPossibilitySnapshot(player) {
+  player.possibleVersion++;
+  player.possibilitySnapshot = summarizePossibleHands(player.globalPossibleHands);
+}
+
+function recordEverythingAction(result, targetPlayer) {
+  state.clueHistory.unshift({
+    type: "everything",
+    giver: currentPlayer().name,
+    receiver: targetPlayer.name,
+    actionText: formatEverythingAction(result.action),
+    turn: state.turn,
+    remainingHands: targetPlayer.possibilitySnapshot.count,
+  });
+}
+
+function formatEverythingSignalSummary(result, targetPlayer) {
+  return `Signal: ${formatEverythingAction(result.action)}; ${targetPlayer.possibilitySnapshot.count.toLocaleString()} ${targetPlayer.name} hands remain.`;
+}
+
+function formatEverythingAction(action) {
+  if (action.kind === "play") {
+    return `play Card ${action.slotIndex + 1}`;
+  }
+
+  if (action.kind === "discard") {
+    const label =
+      action.discardKind === "trash"
+        ? "trash discard"
+        : "safe discard and not known trash";
+    return `${label} Card ${action.position + 1}`;
+  }
+
+  return `clue ${formatClueAction(action.clueAction)}`;
+}
+
+function playCard(cardIndex, actionContext = undefined) {
   const player = currentPlayer();
   const card = player.hand[cardIndex];
 
@@ -599,10 +856,11 @@ function playCard(cardIndex) {
   replaceKnownCardAfterAction(state.currentPlayerIndex, cardIndex, card);
   pruneAllPossibleHandsByVisibleCopies();
   checkGameOver();
+  appendActionContextMessage(actionContext);
   finishAction();
 }
 
-function discardCard(cardIndex) {
+function discardCard(cardIndex, actionContext = undefined) {
   const player = currentPlayer();
   const card = player.hand[cardIndex];
 
@@ -616,7 +874,14 @@ function discardCard(cardIndex) {
 
   replaceKnownCardAfterAction(state.currentPlayerIndex, cardIndex, card);
   pruneAllPossibleHandsByVisibleCopies();
+  appendActionContextMessage(actionContext);
   finishAction();
+}
+
+function appendActionContextMessage(actionContext) {
+  if (actionContext?.signalSummary !== undefined) {
+    state.message += ` ${actionContext.signalSummary}`;
+  }
 }
 
 function replaceKnownCardAfterAction(playerIndex, cardIndex, revealedCard) {
@@ -889,6 +1154,10 @@ function getCurrentStrategy() {
   return state.strategyCache;
 }
 
+function isEverythingIsAClueMode() {
+  return state.strategyMode === STRATEGY_MODES.EVERYTHING_IS_A_CLUE;
+}
+
 function getStrategyGameState(targetPlayerIndex) {
   return {
     currentPlayerIndex: state.currentPlayerIndex,
@@ -910,7 +1179,8 @@ function render() {
     return;
   }
 
-  const strategy = state.gameOver ? undefined : getCurrentStrategy();
+  const strategy =
+    state.gameOver || isEverythingIsAClueMode() ? undefined : getCurrentStrategy();
   const targetPlayerIndex = getPartnerIndex(state.currentPlayerIndex);
   const targetPlayer = state.players[targetPlayerIndex];
   const recommendedClueAction =
@@ -934,8 +1204,9 @@ function renderScoreboard(recommendedClueAction, targetName) {
   getElement("clue-token-count").textContent = `${state.clueTokens}`;
   getElement("strike-count").textContent = `${state.strikes}`;
   getElement("score-count").textContent = `${calculateScore()}`;
-  getElement("recommended-summary").textContent =
-    recommendedClueAction === undefined
+  getElement("recommended-summary").textContent = isEverythingIsAClueMode()
+    ? STRATEGY_MODE_LABELS[state.strategyMode]
+    : recommendedClueAction === undefined
       ? "No clue"
       : `${formatClueAction(recommendedClueAction)} to ${targetName}`;
 
@@ -1162,26 +1433,122 @@ function renderMiniCard(card) {
 }
 
 function renderStrategyPanel(recommendedClueAction, targetPlayer, clueHistogram) {
+  const probabilityPanel = getElement("everything-probability-panel");
+  const histogramPanel = getElement("clue-histogram-panel");
+  const clueButton = getElement("give-clue-button");
+
   getElement("strategy-target").textContent = targetPlayer.name;
+  getElement("strategy-title").textContent = isEverythingIsAClueMode()
+    ? "Everything is a clue"
+    : "Strategy clue";
+  getElement("strategy-clue-label").textContent = isEverythingIsAClueMode()
+    ? "Next action"
+    : "Clue to give";
   getElement("strategy-clue").textContent =
-    recommendedClueAction === undefined
-      ? "No clue"
-      : formatClueAction(recommendedClueAction);
+    isEverythingIsAClueMode()
+      ? STRATEGY_MODE_LABELS[state.strategyMode]
+      : formatRecommendedClue(recommendedClueAction);
   getElement("strategy-actual-hand").innerHTML = renderHandKey(
     handToKey(targetPlayer.hand),
   );
 
-  const clueButton = getElement("give-clue-button");
-  clueButton.textContent =
-    recommendedClueAction === undefined
-      ? "Give clue"
-      : `Give ${formatClue(getClueActionClue(recommendedClueAction))}`;
-  clueButton.toggleAttribute(
-    "disabled",
-    recommendedClueAction === undefined || state.clueTokens === 0 || state.gameOver,
-  );
+  probabilityPanel.hidden = !isEverythingIsAClueMode();
+  histogramPanel.hidden = isEverythingIsAClueMode();
+
+  if (isEverythingIsAClueMode()) {
+    renderEverythingProbabilityControls();
+    clueButton.textContent = "Run action";
+    clueButton.toggleAttribute("disabled", state.gameOver);
+  } else {
+    clueButton.textContent = formatClueButtonLabel(recommendedClueAction);
+    clueButton.toggleAttribute(
+      "disabled",
+      recommendedClueAction === undefined || state.clueTokens === 0 || state.gameOver,
+    );
+  }
 
   renderClueHistogram(clueHistogram);
+}
+
+function formatRecommendedClue(recommendedClueAction) {
+  return recommendedClueAction === undefined
+    ? "No clue"
+    : formatClueAction(recommendedClueAction);
+}
+
+function formatClueButtonLabel(recommendedClueAction) {
+  return recommendedClueAction === undefined
+    ? "Give clue"
+    : `Give ${formatClue(getClueActionClue(recommendedClueAction))}`;
+}
+
+function renderEverythingProbabilityControls() {
+  const handSize = currentPlayer().hand.length;
+  const probabilityGrid = getElement("everything-probability-grid");
+
+  if (state.everythingProbabilities.length !== handSize + 3) {
+    state.everythingProbabilities = createDefaultEverythingProbabilities(handSize);
+  }
+
+  probabilityGrid.innerHTML = "";
+
+  for (const [index, label] of getEverythingProbabilityLabels(handSize).entries()) {
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = "0";
+    input.max = "1";
+    input.step = "0.01";
+    input.value = `${state.everythingProbabilities[index] ?? 0}`;
+    input.dataset.probabilityIndex = `${index}`;
+
+    const field = document.createElement("label");
+    field.className = "probability-field";
+    field.innerHTML = `<span>${label}</span>`;
+    field.append(input);
+    probabilityGrid.append(field);
+  }
+
+  renderEverythingSlotSummary();
+  renderProbabilityTotal();
+}
+
+function getEverythingProbabilityLabels(handSize) {
+  return [
+    "Trash",
+    "Safe discard and not known trash",
+    ...Array.from({ length: handSize }, (_, cardIndex) => `Play ${cardIndex + 1}`),
+    "Clue",
+  ];
+}
+
+function renderEverythingSlotSummary() {
+  const actionPositions = getEverythingActionPositions(currentPlayer());
+
+  getElement("everything-slot-summary").textContent =
+    `Trash ${formatSlotList(
+      actionPositions.trashPositions,
+    )} · Safe discard and not known trash ${formatSlotList(
+      actionPositions.safeDiscardNotKnownTrashPositions,
+    )}`;
+}
+
+function renderProbabilityTotal() {
+  const total = state.everythingProbabilities.reduce(
+    (sum, probability) => sum + (Number.isFinite(probability) ? probability : 0),
+    0,
+  );
+  const totalElement = getElement("everything-probability-total");
+
+  totalElement.textContent = `Total ${total.toFixed(3)}`;
+  totalElement.toggleAttribute("aria-invalid", Math.abs(total - 1) > 1e-6);
+}
+
+function formatSlotList(cardIndexes) {
+  if (cardIndexes.length === 0) {
+    return "none";
+  }
+
+  return cardIndexes.map((cardIndex) => cardIndex + 1).join(", ");
 }
 
 function getClueHistogram(clueToGive, targetPlayer) {
@@ -1242,20 +1609,35 @@ function renderClueHistogram(clueHistogram) {
 function renderHistory() {
   const history = getElement("clue-history");
   history.innerHTML = "";
+  getElement("history-title").textContent = isEverythingIsAClueMode()
+    ? "Signal history"
+    : "Clue history";
 
   if (state.clueHistory.length === 0) {
-    history.innerHTML = "<li>No clues yet</li>";
+    history.innerHTML = `<li>${
+      isEverythingIsAClueMode() ? "No signals yet" : "No clues yet"
+    }</li>`;
     return;
   }
 
   for (const entry of state.clueHistory.slice(0, 8)) {
     const item = document.createElement("li");
-    item.innerHTML = `
-      <strong>${entry.giver}</strong> to <strong>${entry.receiver}</strong>:
-      ${formatClue(entry.clue)}
-      <span>${formatTouchedCards(entry.touchedCardIndexes)}</span>
-      <span>${entry.remainingHands.toLocaleString()} hands</span>
-    `;
+
+    if (entry.type === "everything") {
+      item.innerHTML = `
+        <strong>${entry.giver}</strong> to <strong>${entry.receiver}</strong>:
+        ${entry.actionText}
+        <span>${entry.remainingHands.toLocaleString()} hands</span>
+      `;
+    } else {
+      item.innerHTML = `
+        <strong>${entry.giver}</strong> to <strong>${entry.receiver}</strong>:
+        ${formatClue(entry.clue)}
+        <span>${formatTouchedCards(entry.touchedCardIndexes)}</span>
+        <span>${entry.remainingHands.toLocaleString()} hands</span>
+      `;
+    }
+
     history.append(item);
   }
 }

@@ -70,6 +70,7 @@ export function createClusterClueMapping(globalPossibleHands, gameState, options
       clusterCounts,
       config,
       rebalancePassesPerIteration,
+      1.4 ** iteration,
     );
 
     if (changedAssignments + rebalancedAssignments === 0) {
@@ -547,8 +548,10 @@ function rebalanceAssignments(
   clusterCounts,
   config,
   maxPasses,
+  lowerBoundMultiplier = 1,
 ) {
-  const targetClusterSize = Math.ceil(possibleHandPoints.length / config.clusters.length);
+  const lowerBoundClusterSize =
+    possibleHandPoints.length / (config.clusters.length * lowerBoundMultiplier);
   let totalChangedAssignments = 0;
 
   for (let pass = 0; pass < maxPasses; pass++) {
@@ -556,7 +559,7 @@ function rebalanceAssignments(
 
     for (const [handIndex, handPoint] of possibleHandPoints.entries()) {
       const currentClusterIndex = assignments[handIndex];
-      if (clusterCounts[currentClusterIndex] <= targetClusterSize) {
+      if (clusterCounts[currentClusterIndex] <= lowerBoundClusterSize) {
         continue;
       }
 
@@ -567,7 +570,7 @@ function rebalanceAssignments(
         centroidNorms,
         clusterCounts,
         config,
-        targetClusterSize,
+        lowerBoundClusterSize,
       );
 
       if (nextClusterIndex !== currentClusterIndex) {
@@ -594,7 +597,7 @@ function findBestRebalanceCluster(
   centroidNorms,
   clusterCounts,
   config,
-  targetClusterSize,
+  lowerBoundClusterSize,
 ) {
   let bestClusterIndex = currentClusterIndex;
   let bestClusterCount = clusterCounts[currentClusterIndex];
@@ -604,7 +607,7 @@ function findBestRebalanceCluster(
     const clusterCount = clusterCounts[clusterIndex];
     if (
       clusterIndex === currentClusterIndex ||
-      clusterCount >= targetClusterSize ||
+      clusterCount >= lowerBoundClusterSize ||
       clusterCount >= bestClusterCount
     ) {
       continue;

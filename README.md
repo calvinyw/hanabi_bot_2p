@@ -223,7 +223,13 @@ loops. Each loop does:
 
 1. Assign each hand to its closest legal nonempty centroid.
 2. Run 3 rebalance passes, moving hands out of oversized clusters when there is
-   a smaller legal cluster available.
+   a smaller legal cluster below the current lower-bound goal. On the zero-based
+   `n`th loop, that goal is:
+
+   ```text
+   possibleHandPoints.length / (config.clusters.length * 1.4^n)
+   ```
+
 3. Recompute centroids from the rebalanced assignments.
 
 The second phase then runs normal k-means for `MAX_NORMAL_LOOPS = 10` loops,

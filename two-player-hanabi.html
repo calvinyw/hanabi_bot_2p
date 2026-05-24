@@ -192,6 +192,57 @@
         box-shadow: 0 0 0 3px rgba(180, 49, 49, 0.14);
       }
 
+      .strategy-mode-field {
+        display: grid;
+        grid-column: 1 / -1;
+        gap: 7px;
+      }
+
+      .strategy-mode-field > span {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .mode-control {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        padding: 4px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #eef2eb;
+      }
+
+      .mode-control label {
+        min-width: 0;
+      }
+
+      .mode-control input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .mode-control span {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 38px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        color: var(--muted);
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .mode-control input:checked + span {
+        border-color: #bf8f12;
+        background: var(--accent);
+        color: #201703;
+      }
+
       .setup-actions {
         display: flex;
         align-items: center;
@@ -572,6 +623,41 @@
         font-size: 1.3rem;
       }
 
+      .probability-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .probability-field {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+
+      .probability-field span,
+      .slot-summary {
+        color: var(--muted);
+        font-size: 0.76rem;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .probability-field input {
+        width: 100%;
+        min-height: 38px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+        color: var(--ink);
+        font-weight: 900;
+        padding: 0 8px;
+      }
+
+      #everything-probability-total[aria-invalid="true"] {
+        color: var(--danger);
+      }
+
       .clue-histogram {
         display: grid;
         gap: 7px;
@@ -776,6 +862,28 @@
               <span>H</span>
               <input id="setup-hand-size" type="number" min="3" max="6" value="4" />
             </label>
+            <div class="strategy-mode-field">
+              <span>Strategy</span>
+              <div class="mode-control" role="radiogroup" aria-label="Strategy">
+                <label>
+                  <input
+                    type="radio"
+                    name="setup-strategy"
+                    value="cluster-clue"
+                    checked
+                  />
+                  <span>Cluster clue</span>
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="setup-strategy"
+                    value="everything-is-a-clue"
+                  />
+                  <span>Everything is a clue</span>
+                </label>
+              </div>
+            </div>
           </div>
           <div class="setup-actions">
             <span id="setup-summary"></span>
@@ -829,14 +937,20 @@
 
           <aside class="strategy-panel">
             <div class="strategy-row">
-              <h2>Strategy clue</h2>
+              <h2 id="strategy-title">Strategy clue</h2>
               <span id="strategy-target">Player B</span>
             </div>
             <div class="strategy-value">
-              <span>Clue to give</span>
+              <span id="strategy-clue-label">Clue to give</span>
               <strong id="strategy-clue">No clue</strong>
             </div>
-            <div class="strategy-value">
+            <div id="everything-probability-panel" class="strategy-value" hidden>
+              <span>Probability mix</span>
+              <div id="everything-probability-grid" class="probability-grid"></div>
+              <span id="everything-slot-summary" class="slot-summary"></span>
+              <strong id="everything-probability-total">Total 1.000</strong>
+            </div>
+            <div id="clue-histogram-panel" class="strategy-value">
               <span>Cluster sizes</span>
               <ol id="clue-histogram" class="clue-histogram"></ol>
             </div>
@@ -844,11 +958,11 @@
               <span>Partner hand</span>
               <div id="strategy-actual-hand"></div>
             </div>
-            <button id="give-clue-button" type="button" data-action="give-clue">
+            <button id="give-clue-button" type="button" data-action="strategy-action">
               Give clue
             </button>
             <div class="strategy-row">
-              <h3>Clue history</h3>
+              <h3 id="history-title">Clue history</h3>
             </div>
             <ol id="clue-history" class="history-list"></ol>
           </aside>
